@@ -1,0 +1,4 @@
+inputs = [ "sample/input" ]
+output = "sample/sorted"
+extensions = [ "cr2", "jpeg" ]
+sort_policy = "Date"
