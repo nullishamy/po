@@ -1,9 +1,11 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use color_eyre::eyre::{Result, WrapErr};
 use confique::Config;
 use std::fmt::Debug;
 use std::path::PathBuf;
 use std::fs;
+
+use fast_glob::glob_match;
 
 mod library;
 use library::{Library, SortPolicy};
@@ -22,6 +24,20 @@ struct Cli {
     // Clap <-> Confique integration to let cli args be used as config attrs
     #[command(flatten)]
     cli_config: <AppConfig as Config>::Layer,
+
+    #[command(subcommand)]
+    action: Option<Action>,
+}
+
+#[derive(Subcommand)]
+enum Action {
+    Import,
+    /// Execute a query against the library
+    Query {
+        /// The query to run. A glob string which matches against library paths.
+        /// For example. 2025/10/*.jpeg will match all images taken in October, but only the jpeg previews.
+        query: String,
+    }
 }
 
 #[derive(Config, Debug)]
@@ -35,7 +51,7 @@ struct AppConfig {
     #[config(layer_attr(arg(long)))]
     output: PathBuf,
 
-    /// Extensions to capture within the input paths
+    /// Extensions to capture within the input paths, in lowercase
     #[config(layer_attr(arg(long)))]
     extensions: Vec<String>,
 
@@ -65,7 +81,7 @@ fn init_logging() -> Result<()> {
         .compact();
 
     let filter_layer = EnvFilter::try_from_default_env()
-        .or_else(|_| EnvFilter::try_new("debug"))
+        .or_else(|_| EnvFilter::try_new("info"))
         .unwrap();
 
     tracing_subscriber::registry()
@@ -101,9 +117,16 @@ fn search_input_path(input: &PathBuf, extensions: &[String]) -> Result<Vec<PathB
         let span = debug_span!("file_filter", file = p.to_str());
         let _enter = span.enter();
         
-        let ext = p.extension();
+        let ext = p
+            .extension()
+            .map(|e|
+                 e.to_string_lossy()
+                 .to_string()
+                 .to_lowercase()
+            );
+        
         if let Some(ext) = ext {
-            if extensions.contains(&ext.to_string_lossy().to_string()) {
+            if extensions.contains(&ext) {
                 debug!("capturing file");
                 captured.push(p);
             } else {
@@ -116,6 +139,32 @@ fn search_input_path(input: &PathBuf, extensions: &[String]) -> Result<Vec<PathB
     
     debug!("captured {} files", captured.len());
     Ok(captured)
+}
+
+fn do_import(library: &mut Library, config: AppConfig) -> Result<()> {
+    let mut captured = vec![];
+    for input in &config.inputs {
+        captured.extend(search_input_path(input, &config.extensions)?);
+    }
+
+    info!("captured {} files from {} inputs", captured.len(), config.inputs.len());
+    let new_files = library.process_inputs(&captured)?;
+    
+    info!("got {} new files: {:#?}", new_files.len(), new_files);
+    library.sort_files(new_files, config.sort_policy.clone())?;
+
+    Ok(())
+}
+
+fn do_query(library: &mut Library, query: String) {
+    for file in library.files() {
+        let fname = file.path_in_library.to_string_lossy().to_string();
+        let matches = glob_match(&query, &fname);
+        
+        if matches {
+            eprintln!("{} {}", file.hash.encode(), fname);
+        }
+    }
 }
 
 fn main() -> Result<()> {
@@ -132,28 +181,29 @@ fn main() -> Result<()> {
 
     info!("config loaded: {:#?}", config);
 
+    let mut library = Library::read_from_disk(config.output.clone())?;
+    debug!("loaded library: {:#?}", library);
+
     for input in &config.inputs {
         ensure_directory(input)?;
     }
     
     ensure_directory(&config.output)?;
-    info!("searching inputs for files");
 
-    let mut captured = vec![];
-    for input in &config.inputs {
-        captured.extend(search_input_path(input, &config.extensions)?);
+    match cli.action {
+        Some(act) => match act {
+            Action::Import => {
+                do_import(&mut library, config)?
+            }
+            Action::Query { query } => {
+                do_query(&mut library, query);
+            }
+        },
+        None => {
+            do_import(&mut library, config)?;
+        }
     }
 
-    info!("captured {} files from {} inputs", captured.len(), config.inputs.len());
-
-    let mut library = Library::read_from_disk(config.output.clone())?;
-    
-    debug!("loaded library: {:#?}", library);
-    let new_files = library.process_inputs(&captured)?;
-    
-    info!("got {} new files: {:#?}", new_files.len(), new_files);
-    library.sort_files(new_files, config.sort_policy.clone())?;
-    
     library.persist_to_disk()?;
     
     Ok(())
