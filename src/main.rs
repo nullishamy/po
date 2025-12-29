@@ -18,7 +18,7 @@ use tracing_subscriber::{EnvFilter, fmt};
 #[derive(Parser)]
 struct Cli {
     /// Path to configuration file.
-    #[arg(long, default_value = "po.toml")]
+    #[arg(long, default_value = "po.toml", env = "PO_CONFIG_PATH")]
     config: PathBuf,
 
     // Clap <-> Confique integration to let cli args be used as config attrs
@@ -31,11 +31,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Action {
+    /// Run an import using the config file and add all new pictures to the library
     Import,
     /// Execute a query against the library
+    ///
+    /// The query should be a glob string which matches against library paths.
+    ///
+    /// For example, "2025/10/*.jpeg" will match all images taken in October, but only the jpeg previews.
     Query {
-        /// The query to run. A glob string which matches against library paths.
-        /// For example. 2025/10/*.jpeg will match all images taken in October, but only the jpeg previews.
+        /// The query to run. 
         query: String,
     }
 }
@@ -169,10 +173,9 @@ fn do_query(library: &mut Library, query: String) {
 
 fn main() -> Result<()> {
     init_logging()?;
+    let cli = Cli::parse();
     
     info!("starting up!");
-
-    let cli = Cli::parse();
     let config = AppConfig::builder()
         .preloaded(cli.cli_config)
         .file(cli.config)

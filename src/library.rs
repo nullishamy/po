@@ -23,12 +23,12 @@ pub struct LibraryFile {
 #[serde(crate = "confique::serde")] 
 pub enum SortPolicy {
     Date,
-    None
+    MoveToRoot
 }
 
 impl Default for SortPolicy {
     fn default() -> Self {
-        SortPolicy::None
+        SortPolicy::MoveToRoot
     }
 }
     
@@ -159,7 +159,7 @@ impl Library {
         info!("sorting {} files", new_files.len());
         for file in new_files {
             match sort_policy {
-                SortPolicy::None => {
+                SortPolicy::MoveToRoot => {
                     let fname = file.path.file_name().expect("path to be a normal file");
                     let mut output = self.output_root.clone();
                     output.push(fname);
