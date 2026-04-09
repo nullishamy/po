@@ -199,8 +199,6 @@ impl Library {
                     
                     info!("sorting {} into {}", file.path.display(), output.display());
                     fs::rename(file.path, output)?;
-
-                    dbg!(&in_lib);
                     
                     self.files.push(LibraryFile {
                         hash: file.hash,
